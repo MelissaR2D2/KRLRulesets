@@ -1,3 +1,5 @@
+KRL Ruleset Link: https://raw.githubusercontent.com/MelissaR2D2/KRLRulesets/main/Lab0/hello-world.krl
+
 Answers to Questions in "Do This" Section:
 
 5.2: Do you get the same result on both the default channel and the new channel? Why or why not?
