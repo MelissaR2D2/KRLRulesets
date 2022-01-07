@@ -1,0 +1,16 @@
+Answers to Questions in "Do This" Section:
+
+5.2: Do you get the same result on both the default channel and the new channel? Why or why not?
+No, on the new channel we get the Hello World directive response as declared in our ruleset, but on the default channel we get an "Error: Not allowed by channel policy". This is because our echo/hello event is not in the ruleset of the default channel, but it is in the ruleset of our new channel. Actually, any event would return an eid and list of directives on our new channel, because of the */* event and type policies, but any other event would have an empty directives list because it doesn't fit the parameters our hello_world rule is looking for.
+
+6.2: What happens when you send an event to a deleted channel? Why?
+You get an "Error: ECI not found" error. Since the channel doesn't exist anymore, an event directed to that channel has no way to be processed, so it just returns the channel not found error.
+
+7: What do you observe when you send an echo/hello event to your pico? Why?
+I get a response back that contains an event id and the directives that should happen as a result of the event (in this case just saying "Hello World"). This is because the hello_world rule in our KRL ruleset states to send the "say Hello World" directive when an echo/hello event comes in.
+
+8: What do you observe when you send the misspelled ecco/hello event to your pico? Why?
+I observe a similarly structured response with an event id and list of directives, but the list of directives is empty. This occurs because the */* event and type policies allow any event as a valid event, but our hello_world rule only sends back the "Hello World" directive for echo/hello events.
+
+10: Was there any difference in using the ternary conditional instead of the || operator in the echo/monkey rule? Why might || be preferable in this case?
+In terms of final output, there was not any difference between using the ternary conditional or the || operator. The || operator might be preferable in this case because using the ternary operator repeats the event:att("name") call, evaluating it once for the condition and then, when the condition evaluates to True, is evaluated again when it is bound to name. This is inefficient, particularly if event:att("name") had been a time-consuming call, as well as longer/more cluttered to read.
