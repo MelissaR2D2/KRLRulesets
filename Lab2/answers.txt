@@ -1,0 +1,13 @@
+1. I accomplished step 5 with an event expression. The difference between using an event expression and a rule conditional statement are that with event expressions, the rule is not selected if the condition is not met, whereas with rule conditional statements, the rule would have been selected but would not have fired. A rule conditional statement would be advantageous when you need to do some kind of logging or other processing before taking action, but only sometimes need to take that action, since the rule would select and the prelude would execute, but the rule would only fire if the condition is true. The event expression would be preferable when nothing at all should happen if the condition isn't met.
+
+2. The advantages would be that the messages from different sensors can be responded to and managed completely independently because the ruleset can distinguish them by channel. For example, different thresholds could be set for different sensors, or different types of readings or events can be allowed for different sensors.
+
+3. The output of testing my ruleset before find_high_temps is added was just a returned eid and an empty list of directives. This is because find_high_temps doesn't send any directives - it raises a woven:new_temperature_reading event, but none of my rulesets respond to that event (yet). However, I can see from the logs that two rules ran: io.picolabs.wovyn.emitter:raise_emitter_event and wovyn_base:process_heartbeat, as expected.
+
+4. There are still 0 directives returned, because again the rules I'm writing raise events, they don't send directives. This time, the find_temps_rule should have ran in addition to the other two, and sure enough checking the logs, that's what I see: a total of 3 rules fired.
+
+5. There is no difference, since find_temps_rule doesn't send directives either. See the attached file for the sequence diagram. I included the last threshold_notification rule as well in that.
+
+6. Yes, find_high_temps is an event preprocessing intermediary because it takes the data given from an event and strips it down to just the data needed for further actions. The preprocessing makes it easier for the threshold_violation rule to do its thing.
+
+7. The logs show that find_high_temps work because it says "rule selected wovyn_base : find_high_temps" and then the next line says "fired," so the rule clearly fired. It then shows "event added to schedule" with the attributes I expect the event to have (temperature and timestamp), showing that find_high_temps successfully raised the event it was supposed to.
