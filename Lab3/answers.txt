@@ -1,0 +1,7 @@
+1. The collect_temperatures rule and the temperatures functions work as an event-query API because the collect_temperatures rule is an event-driven API: it takes action and updates data in response to an event. The temperatures functions make up a query API: they allow queries to read the data. In this way, the events and the actions taken by the system are separate from the passive reading of data. This is the event-query model.
+
+2. To find temperatures in range, I used the .filter() function on the list of all temperatures, setting the filter condition to be true if and only if that temperature reading did not occur in the threshold violations list. To test this condition, I used .none() and set the condition to be temp1 = temp2. 
+
+3. If provides doesn't list the temperatures function, then other rulesets who use the temperature_store ruleset as a module can't call the temperatures function and get the list of temperatures.
+
+4. If shares doesn't list the temperatures function, then outside agents (ex. a browser, a curl agent) querying the pico through the Sky Cloud API will not be able to call the temperatures function, and therefore will not be able to get the list of temperatures.
