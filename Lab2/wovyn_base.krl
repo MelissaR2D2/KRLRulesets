@@ -4,11 +4,11 @@ ruleset wovyn_base {
       with
         apiKey = meta:rulesetConfig{"api_key"}
         sessionID = meta:rulesetConfig{"session_id"}
+    
+    use module sensor_profile alias profile
   }
 
   global {
-      temperature_threshold = 65
-      alert_number = "+12082408511"
       fr = "+18305810809"
     
   }
@@ -32,7 +32,7 @@ ruleset wovyn_base {
       pre {
         curr_temp = event:attr("temperature")
       }
-      if curr_temp > temperature_threshold then
+      if curr_temp > profile:threshold() then
         noop()
       fired {
         raise wovyn event "threshold_violation" attributes {
@@ -48,9 +48,9 @@ ruleset wovyn_base {
         body = ("Temperature threshold violated! Temperature: " + event:attr("temperature") + "F").klog("TEXT_BODY")
       }
       every {
-        sdk:sendSMS(alert_number, fr, body) setting(response)
+        sdk:sendSMS(profile:sms(), fr, body) setting(response)
         send_directive("response", response)
       }
-    }*/
-  
+    }
+  */
   }
