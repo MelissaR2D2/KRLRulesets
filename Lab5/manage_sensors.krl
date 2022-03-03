@@ -4,18 +4,27 @@ ruleset manage_sensors {
         shares sensors, all_temps
 
         use module io.picolabs.wrangler alias wrangler
+        use module io.picolabs.subscription alias subscription
     }
   
     global {
         default_threshold = 75
 
         sensors = function() {
-            return ent:sensors || {}
+            return subscription:established().filter(function(sub, k) {
+                return sub{"Tx_role"} == "sensor"
+            })
         }
 
         all_temps = function() {
-            return ent:sensors.map(function(v, k) {
-                return wrangler:picoQuery(v{"eci"}, "temperature_store", "temperatures")
+            return subscription:established().filter(function(sub, k) {
+                return sub{"Tx_role"} == "sensor"
+            }).map(function(sub, k) {
+                peerChannel = sub{"Tx"}
+                peerHost = (sub{"Tx_host"} || meta:host)
+                name = wrangler:picoQuery(peerChannel, "sensor_profile", "profile", null, peerHost){"name"}
+                result = wrangler:picoQuery(peerChannel, "temperature_store", "temperatures", null, peerHost)
+                return {}.put("name", name).put("temps", result)
             })
         }
 
@@ -23,7 +32,8 @@ ruleset manage_sensors {
         [{"name": "sensors"}, {"name": "all_temps"}], 
         "events":
         [ { "domain": "sensor", "name": "new_sensor", "attrs": ["name"] },
-        { "domain": "sensor", "name": "unneeded_sensor", "attrs": ["name"] }
+        { "domain": "sensor", "name": "unneeded_sensor", "attrs": ["name"] },
+        {"domain": "sensor", "name": "introduction", "attrs": ["wellKnown", "Tx_host"]}
         ]}
     }
 
@@ -63,6 +73,33 @@ ruleset manage_sensors {
             )
     }
 
+
+    rule createChildSubscription {
+      select when sensor install_finished
+      always {
+        raise wrangler event "subscription" attributes {
+            "name":"sensor_sub", 
+            "Rx_role":"manager",
+            "Tx_role":"sensor",          
+            "wellKnown_Tx": event:attr("wellKnown"){"id"}
+          }
+      }
+    }
+
+   rule introduceSensor {
+       select when sensor introduction
+       if event:attr("wellKnown") then
+        noop()
+       fired {
+        raise wrangler event "subscription" attributes {
+            "name":"sensor_sub",
+            "Rx_role":"manager",
+            "Tx_role":"sensor",
+            "Tx_host": event:attrs{"Tx_host"} || meta:host,     
+            "wellKnown_Tx": event:attr("wellKnown")
+          }
+      }
+   }
     
 
     rule profile_update {

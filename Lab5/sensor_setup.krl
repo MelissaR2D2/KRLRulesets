@@ -1,6 +1,7 @@
 ruleset sensor_setup {
     meta {
       use module io.picolabs.wrangler alias wrangler
+      use module io.picolabs.subscription alias subscription
     }
   
     global {
@@ -128,9 +129,23 @@ ruleset sensor_setup {
           "attrs": {
             "name": name,
             "eci": event:eci,
-            "test_eci": test_eci
+            "test_eci": test_eci,
+            "wellKnown": subscription:wellKnown_Rx()
           }
         }
       )
     }
+
+  rule acceptSensorSubscriptions {
+    select when wrangler inbound_pending_subscription_added
+    pre {
+      name = event:attr("name") 
+    }
+    if name == "sensor_sub" then                                                  
+    noop()
+    fired {
+      raise wrangler event "pending_subscription_approval" attributes event:attrs; 
+    }
+  }
+  
 }

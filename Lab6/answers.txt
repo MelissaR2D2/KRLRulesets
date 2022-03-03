@@ -1,0 +1,13 @@
+1. An auto-approval rule for subscriptions is insecure because we might not want to let just anybody get notified of events and be able to query data from our picos. Especially if channel policies aren't set up correctly, a malicious actor could do stuff or gain information we don't want them to.
+
+2. Yes, I actually did this in my demonstration video. You just have to make sure the sensor always sends events to all subscriptions tagged with the manager tag, not just the first one.
+
+3. Assuming the multiple sensor types need to stay in the same collection and not be separated out, I would probably change the Tx and Rx subscription tags to specify which type of sensor each sensor is. Then, the sensor manager would be able to filter its communications based on which type of sensor it needs to communicate with.
+
+4. I would just create a super manager pico that allows management picos to subscribe to it, and each of those management picos represent and manage one floor/collection. The super manager would aggregate all the information together using the same subscription techniques as the management picos use for their sensors.
+
+5. Yes, a sensor pico could belong to more than one collection. After the modifications of this lab, if the sensor belongs to more than one collection then it would notify both management picos of the threshold violation and those management picos would both send SMS messages. 
+
+6. I created a new ruleset, sms_profile, because I wanted to keep the SMS information separate from the sensor management, and since the SMS information was going in a different ruleset, the actual rule using the information and sending the notifications should go with it.
+
+7. I moved one rule from my wovyn_base ruleset to the sms_profile ruleset in the management pico, and I added one rule to my wovyn_base pico. I moved the notification rule that listens for the threshold_violation event and sends the text because now the manager needed to send the text, not the sensor. Once I had done that, I needed to add another rule, send_high_temps, to forward the threshold_violation event to the manager pico. I could have modified the find_high_temps rule to send the event directly, but I wanted the sensor pico to still raise the threshold_violation event within itself so the temperature_store could still log it.

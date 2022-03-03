@@ -6,6 +6,8 @@ ruleset wovyn_base {
         sessionID = meta:rulesetConfig{"session_id"}
     
     use module sensor_profile alias profile
+    use module io.picolabs.subscription alias subscription
+
   }
 
   global {
@@ -41,6 +43,24 @@ ruleset wovyn_base {
         }
       }
     }
+
+
+    rule send_high_temps {
+      select when wovyn threshold_violation
+      foreach subscription:established().filter(function(sub, k) {
+        return sub{"Tx_role"} == "manager"
+      }) setting (manager)
+      event:send(
+          { "eci": manager{"Tx"}, 
+          "eid": "threshold-violation", 
+          "domain": "wovyn", "type": "threshold_violation",
+          "attrs": {
+            "temperature": event:attr("temperature"),
+            "timestamp": event:attr("timestamp"),
+          }
+        }, host=(manager{"Tx_host"} || meta:host))
+    }
+    
 /*
     rule threshold_notification {
       select when wovyn threshold_violation
