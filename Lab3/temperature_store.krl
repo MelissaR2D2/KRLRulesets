@@ -2,6 +2,8 @@ ruleset temperature_store {
     meta {
         provides temperatures, threshold_violations, inrange_temperatures
         shares temperatures, threshold_violations, inrange_temperatures
+
+        use module io.picolabs.subscription alias subscription
     }
     
     global {
@@ -22,6 +24,30 @@ ruleset temperature_store {
             }) | []
         }
     }
+    rule send_report {
+        select when sensor report_request
+        pre {
+            sub = subscription:established("Id", event:attrs{"Id"})
+            rci = event:attrs{"rci"}
+            tx = sub[0]{"Tx"}
+            rx = sub[0]{"Rx"}
+            host = sub[0]{"Tx_host"}
+            temp = ent:temperatures.length() => ent:temperatures[ent:temperatures.length() - 1] | null
+        }
+        if temp then
+        event:send(
+            { "eci": tx, 
+            "eid": "sensor report", 
+            "domain": "sensor", "type": "report_result",
+            "attrs": {
+                "rci": rci,
+                "report": temp.put("sensor_Rx", rx),
+                
+            }
+          }, host=(host || meta:host))
+    }
+
+
     rule collect_temperatures {
         select when wovyn new_temperature_reading
         pre {

@@ -1,7 +1,7 @@
 ruleset manage_sensors {
     meta {
-        provides sensors, all_temps
-        shares sensors, all_temps
+        provides sensors, all_temps, temp_reports, all_temp_reports, num_reports
+        shares sensors, all_temps, temp_reports, all_temp_reports, num_reports
 
         use module io.picolabs.wrangler alias wrangler
         use module io.picolabs.subscription alias subscription
@@ -28,14 +28,77 @@ ruleset manage_sensors {
             })
         }
 
+        all_temp_reports = function() {
+            return ent:reports
+        }
+
+        num_reports = function() {
+            return ent:num_reports
+        }
+
+        temp_reports = function() {
+            num_reports = ent:num_reports || 0
+            max_reports = ((5 > num_reports) => num_reports | 5).klog("MAX_REPORTS")
+            return (max_reports == 0) => {} | (num_reports - max_reports).range(ent:num_reports).reduce(function(m, i) {
+                key = "report#" + i.as("String")
+                return ent:reports{key} => m.put(key, ent:reports{key}) | m
+            }, {})
+        }
+
+
         __testing = { "queries":
-        [{"name": "sensors"}, {"name": "all_temps"}], 
+        [{"name": "sensors"}, {"name": "all_temps"}, {"name": "temp_reports"}, {"name": "num_reports"}], 
         "events":
         [ { "domain": "sensor", "name": "new_sensor", "attrs": ["name"] },
         { "domain": "sensor", "name": "unneeded_sensor", "attrs": ["name"] },
-        {"domain": "sensor", "name": "introduction", "attrs": ["wellKnown", "Tx_host"]}
+        {"domain": "sensor", "name": "introduction", "attrs": ["wellKnown", "Tx_host"]},
+        {"domain": "report", "name": "new_report"}
         ]}
     }
+
+    rule request_report {
+        select when report new_report
+        foreach subscription:established().filter(function(sub, k) {
+            return sub{"Tx_role"} == "sensor"
+          }) setting (sensor)
+          pre {
+            num = ent:num_reports || 0
+            reportID = "report#" + num.as("String")
+          }
+          event:send(
+              { "eci": sensor{"Tx"}, 
+              "eid": "sensor report", 
+              "domain": "sensor", "type": "report_request",
+              "attrs": {
+                  "Id": sensor{"Id"},
+                  "rci": reportID
+              }
+            }, host=(sensor{"Tx_host"} || meta:host))
+          always {
+            ent:num_sensors := subscription:established().filter(function(sub, k) {
+                return sub{"Tx_role"} == "sensor"
+              }).length() on final
+            ent:num_reports := ent:num_reports => ent:num_reports + 1 | 1 on final
+            ent:reports := ent:reports => ent:reports.put({}).put([reportID, "temperature_sensors"], ent:num_sensors).put([reportID, "responding"], 0).put([reportID, "temperatures"], []) | 
+                                                   {}.put([reportID, "temperature_sensors"], ent:num_sensors).put([reportID, "responding"], 0).put([reportID, "temperatures"], []) on final
+          }
+    }
+
+    rule get_report {
+        select when sensor report_result
+        pre {
+            rci = event:attrs{"rci"}
+            report = ent:reports{rci}.klog("report") 
+            temp = event:attrs{"report"}.klog("temp")
+        }
+        if report{"responding"} + 1 == report{"temperature_sensors"} then
+            noop()
+        always {
+            ent:reports{[rci, "responding"]} := ent:reports{[rci, "responding"]} + 1
+            ent:reports{[rci, "temperatures"]} := ent:reports{[rci, "temperatures"]}.append(temp)
+        }
+    }
+
 
     rule sensor_installation {
         select when sensor new_sensor where event:attrs >< "name"
