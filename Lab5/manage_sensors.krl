@@ -52,8 +52,19 @@ ruleset manage_sensors {
         [ { "domain": "sensor", "name": "new_sensor", "attrs": ["name"] },
         { "domain": "sensor", "name": "unneeded_sensor", "attrs": ["name"] },
         {"domain": "sensor", "name": "introduction", "attrs": ["wellKnown", "Tx_host"]},
-        {"domain": "report", "name": "new_report"}
+        {"domain": "report", "name": "new_report"},
+        {"domain": "manager", "name": "initialize"}
         ]}
+    }
+
+    rule initialize {
+        select when manager initialize
+        always {
+            ent:sensors := {}
+            ent:reports := {}
+            ent:num_sensors := {}
+            ent:num_reports := 0
+        }
     }
 
     rule request_report {
@@ -137,7 +148,7 @@ ruleset manage_sensors {
     }
 
 
-    rule createChildSubscription {
+   /* rule createChildSubscription {
       select when sensor install_finished
       always {
         raise wrangler event "subscription" attributes {
@@ -162,9 +173,8 @@ ruleset manage_sensors {
             "wellKnown_Tx": event:attr("wellKnown")
           }
       }
-   }
+   }*/
     
-
     rule profile_update {
         select when sensor install_finished
         pre {

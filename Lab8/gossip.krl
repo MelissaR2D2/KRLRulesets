@@ -3,8 +3,8 @@ ruleset gossip {
       use module io.picolabs.wrangler alias wrangler
       use module io.picolabs.subscription alias subscription
 
-      provides getSensorID, get_needed_rumors, temperatures, getPeers, getRumors, send_seen_to, getSeen, getOthersSeen, heartbeat_period, operating_state
-      shares getSensorID, get_needed_rumors, temperatures, getPeers, getRumors, send_seen_to, getSeen, getOthersSeen, heartbeat_period, operating_state
+      provides getSensorID, get_needed_rumors, temperatures, getPeers, getRumors, send_seen_to, getSeen, getOthersSeen, heartbeat_period, operating_state, violations, getViolationSequenceNum
+      shares getSensorID, get_needed_rumors, temperatures, getPeers, getRumors, send_seen_to, getSeen, getOthersSeen, heartbeat_period, operating_state, violations, getViolationSequenceNum
     }
   
     global {
@@ -14,9 +14,9 @@ ruleset gossip {
         }
        
         temperatures = function() {
-            return ent:seen.keys().reduce(function(m, k) {
-                v = ent:seen{k}
-                latest_rumor = ent:rumors{k + ":" + v.as("String")}
+            return ent:seen{"temperatures"}.keys().reduce(function(m, k) {
+                v = ent:seen{["temperatures", k]}.klog("V: ")
+                latest_rumor = ent:rumors{k + ":temperatures:" + v.as("String")}
                 return latest_rumor => m.put(k, {"Sequence Number": v, "Temperature": latest_rumor{"Temperature"}, "Timestamp": latest_rumor{"Timestamp"}}) | m
             }, {})
         }
@@ -33,16 +33,16 @@ ruleset gossip {
             return ent:others_seen
         }
 
-        update_seen = function(sensorID, seen) {
-            old_seen = ent:others_seen{sensorID} || {}
-            return seen.map(function(v,k) {
-                return (isnull(old_seen{k}) || (old_seen{k} == v - 1)) => v | old_seen{k}
-            })
-            
-        }
-
         getPeers = function() {
             return ent:peers
+        }
+
+        violations = function() {
+            return ent:violations
+        }
+
+        getViolationSequenceNum = function() {
+            return ent:violation_sequence_num
         }
 
         get_needed_rumors = function() {
@@ -54,21 +54,37 @@ ruleset gossip {
             subs = subscription:established().filter(function(sub, k) {
                 return sub{"Tx_role"} == "sensor"
             }).reduce(function(needed, sub) {
-                sensorID = ent:peers{sub{"Id"}.klog("a sub")}
+                sensorID = ent:peers{sub{"Id"}}.klog("a sub")
+                // seen = {"temperatures": {}, "violations": {}}
                 seen = ent:others_seen{sensorID}.klog("what we know")
-                //check if we know about any sensors it doesn't know about
-                not_known = ent:seen.keys().filter(function(k){
-                    ent:seen{k} && seen => not seen{k} | false
-                }).map(function(unknownID) {
-                    rumor = ent:rumors{unknownID + ":1"}
-                    return rumor.put("Tx", sub{"Tx"}.put("Tx_host", sub{"Tx_host"}))
-                }).klog("not_known")
 
-                return needed.append(not_known).append(seen => seen.keys().reduce(function(all, key) {
-                    next_num = seen{key} + 1
-                    rumor = ent:rumors{key + ":" + next_num.as("String")}
-                    return rumor => all.append([rumor.put("Tx", sub{"Tx"}).put("Tx_host", sub{"Tx_host"})]) | all
-                }, []) | ent:rumors{ent:sensorID + ":1"}.put("Tx", sub{"Tx"}.put("Tx_host", sub{"Tx_host"})).defaultsTo([])) // if we don't know anything about what it's seen, just send our own first message
+                //check if we know about any sensors it doesn't know about
+                not_known_map = ent:seen.map(function(v,type) {
+                    return v.keys().filter(function(k){
+                       return ent:seen{[type, k]} && not (seen >< [type, k]).klog("seen?") // => not seen{[type, k]} | false
+                    }).map(function(unknownID) {
+                        rumor = ent:rumors{unknownID + ":" + type + ":1"}.klog("rumor: ")
+                        return rumor.put("Tx", sub{"Tx"}).put("Tx_host", sub{"Tx_host"})
+                    })
+                }).klog("not Known Map")
+                // flatten map into all first rumors about sensors this sensor doesn't know about
+                not_known = not_known_map.keys().reduce(function(rumors, key) {
+                    return rumors.append(not_known_map{key})
+                }, []).klog("all not known")
+
+                // now make list of all the next rumors needed
+                // defaulting to our first messages if we don't know what the other sensor has seen
+                next_known = seen.keys().reduce(function(rumors, key) {
+                    a = key.klog("type: ")
+                    seen_of_type = seen{key}.klog("seen of type")
+                    return rumors.append(seen_of_type.keys().reduce(function(sensor_rumors, sensor) {
+                        next_num = seen_of_type{sensor} + 1
+                        rumor = ent:rumors{sensor + ":" + key + ":" + next_num.as("String")}
+                        return rumor => sensor_rumors.append([rumor.put("Tx", sub{"Tx"}).put("Tx_host", sub{"Tx_host"})]) | sensor_rumors
+                    }, []))
+                }, []).klog("next known:")
+
+                return needed.append(not_known).append(next_known)
             }, [])
             return subs
         }
@@ -82,11 +98,21 @@ ruleset gossip {
             ranking = subs.map(function(sub){
                 sensorID = ent:peers{sub{"Id"}}.klog("sensorID: ")
                 seen = ent:others_seen{sensorID}.klog("others seen: ")
-                return (seen => seen.keys().reduce(function(sum, key) {
+            
+                return (seen => seen.keys().reduce(function(sum, type) {
+                    t = type.klog("type")
+                    type_seen = seen{type}
+                    return sum + type_seen.keys().reduce(function(sum, key) {
+                        other_num = seen{[type, key]}.klog("other num")
+                        my_num = ent:seen{[type, key]}.klog("my num")
+                        return sum + (my_num => (other_num > my_num => (other_num - my_num) | 0) | other_num).klog("add: ")
+                    }, 0).klog("sum for this type")
+                }, 0) | 0).klog("sum for this sub")
+                /*return (seen => seen.keys().filter(function(k) { k != "violations"}).reduce(function(sum, key) {
                     other_num = seen{key}.klog("other num")
                     my_num = ent:seen{key}.klog("my num")
                     return sum + (my_num => (other_num > my_num => (other_num - my_num) | 0) | other_num).klog("add: ")
-                }, 0) | 0).klog("value: ")
+                }, 0) | 0).klog("value: ")*/
             }).klog("rankings: ")
             max_val = ranking.reduce(function(max, rank, i, arr) {
                 return rank > max => rank | max
@@ -106,15 +132,16 @@ ruleset gossip {
     
         operating_state = function(){ent:gossiper_state};
     
-        default_heartbeat_period = 5; //seconds
+        default_heartbeat_period = 1; //seconds
     
         my_rid = function(){meta:rid};
     
 
         __testing = { "queries":
-        [{"name": "getSensorID"}, {"name": "get_needed_rumors"}, {"name": "temperatures"}, {"name": "getPeers"}, {"name": "getRumors"}, 
+        [{"name": "getSensorID"}, {"name": "temperatures"}, {"name": "violations"}, {"name": "getSeen"},
+        {"name": "getRumors"}, {"name": "get_needed_rumors"}, {"name": "getPeers"},  
         {"name": "heartbeat_period"},
-        {"name": "send_seen_to"}, {"name": "getSeen"}, {"name": "getOthersSeen"}, {"name": "operating_state"}], 
+        {"name": "send_seen_to"}, {"name": "getOthersSeen"}, {"name": "operating_state"},  {"name": "getViolationSequenceNum"}], 
         "events":
         [ { "domain": "gossip", "name": "initialize", "attrs": [] },
           { "domain": "gossip", "name": "new_heartbeat_period", "attrs": ["heartbeat_period"] },
@@ -161,9 +188,12 @@ ruleset gossip {
         always {
             ent:sensorID := "sensor:" + random:uuid()
             ent:rumors := {}
-            ent:seen := {}
+            ent:seen := {"temperatures": {}, "violations": {}}
             ent:others_seen := {}
-            ent:sequence_num := 0
+            ent:temp_sequence_num := 0
+            ent:violation_sequence_num := 0
+            ent:in_violation := false
+            ent:violations := 0
             ent:heartbeat_period := period if ent:heartbeat_period.isnull();
             ent:gossiper_state := "running" if ent:gossiper_state.isnull();
             ent:peers := {}
@@ -183,7 +213,8 @@ ruleset gossip {
             noop()
         fired {
             ent:peers{id} := sensorID
-            ent:seen{sensorID} := 0
+            ent:seen{["temperatures", sensorID]} := 0
+            ent:seen{["violations", sensorID]} := 0
         }
     }
 
@@ -209,10 +240,7 @@ ruleset gossip {
                 "eid": "gossip-rumor", 
                 "domain": "gossip", "type": "rumor",
                 "attrs": {
-                    "MessageID": rumor{"MessageID"},
-                    "SensorID": rumor{"SensorID"},
-                    "Temperature": rumor{"Temperature"},
-                    "Timestamp": rumor{"Timestamp"},
+                    "rumor": rumor
                 }
                 }, host=(rumor{"Tx_host"} || meta:host))
         notfired {
@@ -244,7 +272,15 @@ ruleset gossip {
         pre {
           temp = event:attr("temperature")
           time = event:attr("timestamp")
-          messageID = ent:sensorID + ":" + (ent:sequence_num + 1).as("String")
+          messageID = ent:sensorID + ":temperatures:" + (ent:temp_sequence_num + 1).as("String")
+
+          violationMessageID = ent:sensorID + ":violations:" + (ent:violation_sequence_num + 1)
+            message = {
+                "MessageID": violationMessageID,
+                "SensorID": ent:sensorID,
+                "Update": -1,
+                "Type": "violation"
+            }
         }
         if ent:gossiper_state == "running" then
             noop()
@@ -253,32 +289,97 @@ ruleset gossip {
           "SensorID": ent:sensorID,
           "Temperature": temp,
           "Timestamp": time,
+          "Type": "temperature"
          }
-          ent:sequence_num := ent:sequence_num + 1
-          ent:seen{ent:sensorID} := ent:sequence_num
+          ent:temp_sequence_num := ent:temp_sequence_num + 1
+          ent:seen{["temperatures", ent:sensorID]} := ent:temp_sequence_num
+
+          // if we were in violation, assume that now we're not, so add update
+          // this is dumb because the violation count will decrement for every message
+          // only to increment immediately after receiving the threshold_violation if it was a violation
+          // but there's no way of finding out if it was a violation otherwise
+          ent:rumors := ent:in_violation => ent:rumors.put([violationMessageID], message) | ent:rumors
+          ent:violations := ent:in_violation => ent:violations - 1 | ent:violations
+          ent:violation_sequence_num := ent:in_violation => ent:violation_sequence_num + 1 | ent:violation_sequence_num
+          ent:in_violation := false
+          ent:seen{["violations", ent:sensorID]} := ent:violation_sequence_num
         }
       }
+
+    rule threshold_violation_received {
+        select when wovyn threshold_violation
+        pre {
+            messageID = ent:sensorID + ":violations:" + (ent:violation_sequence_num + 1)
+            message = {
+                "MessageID": messageID,
+                "SensorID": ent:sensorID,
+                "Update": 1,
+                "Type": "violation"
+            }
+        }
+        if ent:gossiper_state == "running" then 
+            noop()
+        fired {
+           // if we weren't in violation, now we are, so add update
+          ent:rumors := ent:in_violation => ent:rumors | ent:rumors.put([messageID], message)
+          ent:violations := ent:in_violation => ent:violations | ent:violations + 1
+          ent:violation_sequence_num := ent:in_violation => ent:violation_sequence_num | ent:violation_sequence_num + 1
+          ent:in_violation := true
+          ent:seen{["violations", ent:sensorID]} := ent:violation_sequence_num
+        }
+    }
 
     rule received_rumor {
         select when gossip rumor
         pre {
-            messageID = event:attrs{"MessageID"}
-            sensorID = event:attrs{"SensorID"}
-            temp = event:attrs{"Temperature"}
-            time = event:attrs{"Timestamp"}
-            seqNum = messageID.split(re#:#)[2].as("Number").klog("seqNum")
-            hasSeenNum = ent:seen{sensorID}.klog("hasSeenNum") || 0
+            // todo: make sure type is being sent
+            type = event:attrs{["rumor", "Type"]}
+        }
+        if type == "temperature" then 
+            noop()
+        fired {
+            raise gossip event "temp_rumor" attributes event:attrs
+        } else {
+            raise gossip event "violation_rumor" attributes event:attrs
+        }
+    }
+
+    rule received_temp_rumor {
+        select when gossip temp_rumor
+        pre {
+            rumor = event:attrs{"rumor"}
+            messageID = rumor{"MessageID"}
+            sensorID = rumor{"SensorID"}
+            temp = rumor{"Temperature"}
+            time = rumor{"Timestamp"}
+            seqNum = messageID.split(re#:#)[3].as("Number").klog("seqNum")
+            hasSeenNum = ent:seen{["temperatures", sensorID]}.klog("hasSeenNum") || 0
+            new_seen = ((hasSeenNum == seqNum - 1) => seqNum | hasSeenNum).klog("new seen")
         }
         if ent:gossiper_state == "running" then
             noop()
         fired {
-            ent:seen{sensorID} := ((hasSeenNum == seqNum - 1) => seqNum | hasSeenNum).klog("new seen")
-            ent:rumors{messageID} := {"MessageID": messageID,
-            "SensorID": sensorID,
-            "Temperature": temp,
-            "Timestamp": time,
-           }
+            ent:seen{["temperatures", sensorID]} := new_seen
+            ent:rumors{messageID} := rumor
+        }
+    }
 
+    rule recieved_violation_rumor {
+        select when gossip violation_rumor
+        pre {
+            rumor = event:attrs{"rumor"}
+            messageID = rumor{"MessageID"}.klog("messageID")
+            sensorID = rumor{"SensorID"}
+            update = rumor{"Update"}
+            seqNum = messageID.split(re#:#)[3].as("Number").klog("seqNum")
+            hasSeenNum = ent:seen{["violations", sensorID]}.klog("hasSeenNum") || 0
+        }
+        if ent:gossiper_state == "running" && (hasSeenNum == seqNum - 1) then  //only update if this is the next message in the sequence
+            noop()
+        fired {
+            ent:seen{["violations", sensorID]} := seqNum
+            ent:violations := ent:violations + update
+            ent:rumors{messageID} := rumor
         }
     }
 
@@ -295,3 +396,65 @@ ruleset gossip {
         }
     }
 }
+
+
+
+/* 
+
+violation rumor:
+{
+    "MessageID": "sensor:wgi34t5t35et:violation:14",
+    "SensorID": "sensor:wgi34t5t35et",
+    "Update": 1 or -1,
+    "Type": "violation"
+}
+
+others_seen = {
+    "sensor1" : {
+        "sensor1": 1,
+        "sensor2", 2
+    }
+    "sensor3": {
+        "sensor2": 1,
+        "sensor3": 2
+    }
+}
+
+new format:
+seen = {
+    "temperatures": {
+        "sensor1": 10,
+    }
+    "violations": {
+        "sensor2": 4,
+    }
+}
+
+others_seen = {
+    "sensor1" = {
+        "temperatures": {
+            "sensor1": 1,
+            "sensor2": 3,
+        }
+        "violations": {
+            "sensor1": 2,
+            "sensor3": 3
+        }
+    }
+}
+
+
+I think I'm going to do it this way:
+- state variable containing counter
+- state variable keeping track of whether or not we're in a violation
+- separate pool for violation rumors, just for simplicity
+- when in_violation changes, a message with a 1 or -1 is added, with a unique ID
+- picos broadcast their current state variable with their seen messages
+- 33% of the time they choose to send a violation rumor
+    - a pico whose seen doesn't match current counter is chosen
+    - then a random violation rumor that would update in the correct direction is chosen and sent
+- when a pico receives a violation rumor:
+    - check if they have the uuID, ignore if yes
+    - otherwise update with count
+
+*/

@@ -95,8 +95,38 @@ ruleset sensor_setup {
       }
     }
 
-    rule query_channel_added {
+    rule install_gossip {
       select when wrangler ruleset_installed where event:attrs{"rid"} == "temperature_store"
+      pre {
+        name = event:attr("name")
+      }       
+      fired {
+        raise wrangler event "install_ruleset_request" attributes {
+          "absoluteURL": "file:///Users/student/Documents/College/Winter 2022/CS462/Lab8/",
+          "rid": "gossip",
+          "config": {},
+          "name": name
+        }
+      }
+    }
+
+    rule install_subscriptions {
+      select when wrangler ruleset_installed where event:attrs{"rid"} == "gossip"
+      pre {
+        name = event:attr("name")
+      }  
+      fired {
+        raise wrangler event "install_ruleset_request" attributes {
+          "absoluteURL": "file:///Users/student/Documents/College/Winter 2022/CS462/Lab5/",
+          "rid": "subscriptions",
+          "config": {},
+          "name": name
+        }
+      }
+    }
+
+    rule query_channel_added {
+      select when wrangler ruleset_installed where event:attrs{"rid"} == "subscriptions"
       pre {
           name = event:attrs{"name"}
           tags = ["test"]
@@ -135,17 +165,5 @@ ruleset sensor_setup {
         }
       )
     }
-
-  rule acceptSensorSubscriptions {
-    select when wrangler inbound_pending_subscription_added
-    pre {
-      name = event:attr("name") 
-    }
-    if name == "sensor_sub" then                                                  
-    noop()
-    fired {
-      raise wrangler event "pending_subscription_approval" attributes event:attrs; 
-    }
-  }
   
 }
