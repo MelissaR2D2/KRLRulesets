@@ -55,27 +55,25 @@ ruleset gossip {
                 return sub{"Tx_role"} == "sensor"
             }).reduce(function(needed, sub) {
                 sensorID = ent:peers{sub{"Id"}}.klog("a sub")
-                // seen = {"temperatures": {}, "violations": {}}
                 seen = ent:others_seen{sensorID}.klog("what we know")
 
                 //check if we know about any sensors it doesn't know about
                 not_known_map = ent:seen.map(function(v,type) {
                     return v.keys().filter(function(k){
-                       return ent:seen{[type, k]} && not (seen >< [type, k]).klog("seen?") // => not seen{[type, k]} | false
+                       return ent:seen{[type, k]} && not (seen >< [type, k]) // => not seen{[type, k]} | false
                     }).map(function(unknownID) {
-                        rumor = ent:rumors{unknownID + ":" + type + ":1"}.klog("rumor: ")
+                        rumor = ent:rumors{unknownID + ":" + type + ":1"}
                         return rumor.put("Tx", sub{"Tx"}).put("Tx_host", sub{"Tx_host"})
                     })
-                }).klog("not Known Map")
+                })
                 // flatten map into all first rumors about sensors this sensor doesn't know about
                 not_known = not_known_map.keys().reduce(function(rumors, key) {
                     return rumors.append(not_known_map{key})
-                }, []).klog("all not known")
+                }, [])
 
                 // now make list of all the next rumors needed
                 // defaulting to our first messages if we don't know what the other sensor has seen
                 next_known = seen.keys().reduce(function(rumors, key) {
-                    a = key.klog("type: ")
                     seen_of_type = seen{key}.klog("seen of type")
                     return rumors.append(seen_of_type.keys().reduce(function(sensor_rumors, sensor) {
                         next_num = seen_of_type{sensor} + 1
@@ -100,24 +98,18 @@ ruleset gossip {
                 seen = ent:others_seen{sensorID}.klog("others seen: ")
             
                 return (seen => seen.keys().reduce(function(sum, type) {
-                    t = type.klog("type")
                     type_seen = seen{type}
                     return sum + type_seen.keys().reduce(function(sum, key) {
-                        other_num = seen{[type, key]}.klog("other num")
-                        my_num = ent:seen{[type, key]}.klog("my num")
-                        return sum + (my_num => (other_num > my_num => (other_num - my_num) | 0) | other_num).klog("add: ")
+                        other_num = seen{[type, key]}
+                        my_num = ent:seen{[type, key]}
+                        return sum + (my_num => (other_num > my_num => (other_num - my_num) | 0) | other_num)
                     }, 0).klog("sum for this type")
                 }, 0) | 0).klog("sum for this sub")
-                /*return (seen => seen.keys().filter(function(k) { k != "violations"}).reduce(function(sum, key) {
-                    other_num = seen{key}.klog("other num")
-                    my_num = ent:seen{key}.klog("my num")
-                    return sum + (my_num => (other_num > my_num => (other_num - my_num) | 0) | other_num).klog("add: ")
-                }, 0) | 0).klog("value: ")*/
             }).klog("rankings: ")
             max_val = ranking.reduce(function(max, rank, i, arr) {
                 return rank > max => rank | max
             }, 0)
-            // if multiple have the same ranking, we'll randomly choose
+            // if multiple have the same ranking, we'll randomly choose from them
             res = ranking.reduce(function(idxs, val, i, arr) {
                 return (val == max_val) => idxs.append([i]) | idxs
             }, []).map(function(i) {
@@ -371,8 +363,8 @@ ruleset gossip {
             messageID = rumor{"MessageID"}.klog("messageID")
             sensorID = rumor{"SensorID"}
             update = rumor{"Update"}
-            seqNum = messageID.split(re#:#)[3].as("Number").klog("seqNum")
-            hasSeenNum = ent:seen{["violations", sensorID]}.klog("hasSeenNum") || 0
+            seqNum = messageID.split(re#:#)[3].as("Number")
+            hasSeenNum = ent:seen{["violations", sensorID]} || 0
         }
         if ent:gossiper_state == "running" && (hasSeenNum == seqNum - 1) then  //only update if this is the next message in the sequence
             noop()
@@ -396,65 +388,3 @@ ruleset gossip {
         }
     }
 }
-
-
-
-/* 
-
-violation rumor:
-{
-    "MessageID": "sensor:wgi34t5t35et:violation:14",
-    "SensorID": "sensor:wgi34t5t35et",
-    "Update": 1 or -1,
-    "Type": "violation"
-}
-
-others_seen = {
-    "sensor1" : {
-        "sensor1": 1,
-        "sensor2", 2
-    }
-    "sensor3": {
-        "sensor2": 1,
-        "sensor3": 2
-    }
-}
-
-new format:
-seen = {
-    "temperatures": {
-        "sensor1": 10,
-    }
-    "violations": {
-        "sensor2": 4,
-    }
-}
-
-others_seen = {
-    "sensor1" = {
-        "temperatures": {
-            "sensor1": 1,
-            "sensor2": 3,
-        }
-        "violations": {
-            "sensor1": 2,
-            "sensor3": 3
-        }
-    }
-}
-
-
-I think I'm going to do it this way:
-- state variable containing counter
-- state variable keeping track of whether or not we're in a violation
-- separate pool for violation rumors, just for simplicity
-- when in_violation changes, a message with a 1 or -1 is added, with a unique ID
-- picos broadcast their current state variable with their seen messages
-- 33% of the time they choose to send a violation rumor
-    - a pico whose seen doesn't match current counter is chosen
-    - then a random violation rumor that would update in the correct direction is chosen and sent
-- when a pico receives a violation rumor:
-    - check if they have the uuID, ignore if yes
-    - otherwise update with count
-
-*/
